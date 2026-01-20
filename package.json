@@ -1,0 +1,15 @@
+{
+  "name": "signage-player",
+  "version": "1.0.4",
+  "description": "Zero-Blink High Precision Sync Player",
+  "author": "tayh-bilal <bilaltayh@gmail.com>",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}

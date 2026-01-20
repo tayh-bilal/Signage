@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Zero-Blink Precision Player</title>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: black; cursor: none; }
+        video { width: 100%; height: 100%; object-fit: fill; display: block; background: black; }
+        
+        #idle-ui {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            color: #0f0; font-family: 'Courier New', monospace; background: black; z-index: 500;
+            display: none; 
+        }
+        #idle-time { font-size: 120px; font-weight: bold; margin-bottom: 5px; }
+        #idle-ms { font-size: 50px; margin-bottom: 50px; opacity: 0.8; }
+        #idle-id { font-size: 32px; border: 3px solid #0f0; padding: 20px 50px; border-radius: 15px; letter-spacing: 3px; font-weight: bold; }
+
+        #sync-ui {
+            position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); color: #0f0; 
+            background: rgba(0,0,0,0.9); padding: 15px 30px; font-family: monospace;
+            border-radius: 8px; display: none; z-index: 1000; font-size: 24px; border: 1px solid #0f0;
+        }
+        #volume-ui {
+            position: absolute; top: 20px; right: 20px; color: #0f0; 
+            background: rgba(0,0,0,0.8); padding: 15px; font-family: monospace;
+            border-radius: 5px; font-size: 20px; font-weight: bold; display: none; z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="idle-ui">
+        <div id="idle-time">00:00:00</div>
+        <div id="idle-ms">.000</div>
+        <div id="idle-id">SCREEN ID: INITIALIZING...</div>
+    </div>
+
+    <div id="sync-ui"></div>
+    <div id="volume-ui"></div>
+    <video id="videoPlayer" autoplay></video>
+
+<script>
+    const fs = require('fs');
+    const path = require('path');
+    const https = require('https');
+    const os = require('os');
+
+    const isPackaged = !process.defaultApp;
+    const baseDir = isPackaged ? path.join(process.env.APPDATA, 'ZeroBlinkPlayer') : __dirname;
+    if (!fs.existsSync(baseDir)) fs.mkdirSync(baseDir, { recursive: true });
+
+    const video = document.getElementById('videoPlayer');
+    const syncUi = document.getElementById('sync-ui');
+    const volumeUi = document.getElementById('volume-ui');
+    const idleUi = document.getElementById('idle-ui');
+    const idleTimeTxt = document.getElementById('idle-time');
+    const idleMsTxt = document.getElementById('idle-ms');
+    const idleIdTxt = document.getElementById('idle-id');
+    
+    const localFolder = path.join(__dirname, 'videos');
+    if (!fs.existsSync(localFolder)) {
+        try { fs.mkdirSync(localFolder); } catch(e) {}
+    }
+
+    // --- ID LOGIC (AUTO-CLEANING) ---
+    const configPath = path.join(baseDir, 'screen-config.json');
+    let screenId = "default";
+
+    function generateUniqueId() {
+        const interfaces = os.networkInterfaces();
+        let macPart = '000000000000';
+        for (let name in interfaces) {
+            for (let iface of interfaces[name]) {
+                if (!iface.internal && iface.mac !== '00:00:00:00:00:00') {
+                    macPart = iface.mac.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+                    break;
+                }
+            }
+        }
+        return macPart; 
+    }
+
+    try {
+        if (fs.existsSync(configPath)) {
+            let data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            if (/[^a-zA-Z0-9]/.test(data.screenId)) {
+                screenId = data.screenId.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+                fs.writeFileSync(configPath, JSON.stringify({ screenId: screenId }, null, 2));
+            } else {
+                screenId = data.screenId;
+            }
+        } else {
+            screenId = generateUniqueId();
+            fs.writeFileSync(configPath, JSON.stringify({ screenId: screenId }, null, 2));
+        }
+    } catch(e) { screenId = "ERR-ID"; }
+    
+    idleIdTxt.innerText = `SCREEN ID: ${screenId}`;
+
+    // --- SYNC OFFSET & CLOCK ---
+    let timeOffset = 0; 
+    const offsetFile = path.join(baseDir, 'time_offset.txt');
+    if (fs.existsSync(offsetFile)) {
+        try { timeOffset = parseFloat(fs.readFileSync(offsetFile, 'utf8')) || 0; } catch(e) {}
+    }
+
+    function updateSyncClock() {
+        const now = new Date(Date.now() + (timeOffset * 1000));
+        const hours = String(now.getHours()).padStart(2, '0');
+        const mins = String(now.getMinutes()).padStart(2, '0');
+        const secs = String(now.getSeconds()).padStart(2, '0');
+        const ms = String(now.getMilliseconds()).padStart(3, '0');
+        idleTimeTxt.innerText = `${hours}:${mins}:${secs}`;
+        idleMsTxt.innerText = `.${ms}`;
+    }
+    setInterval(updateSyncClock, 16); 
+
+    // --- PLAYBACK ENGINE ---
+    let videos = [];
+    let watchdogTimer = null;
+    let syncInterval = null;
+    const playlistUrl = `https://itguodvoatxhbibfvjch.supabase.co/functions/v1/playlist?screenId=${screenId}`;
+
+    function getSyncStatus() {
+        if (!videos.length) return null;
+        const totalDuration = videos.reduce((acc, v) => acc + (v.duration || 0), 0);
+        const now = (Date.now() / 1000) + timeOffset; 
+        const globalPos = now % totalDuration;
+        let elapsed = 0;
+        for (let i = 0; i < videos.length; i++) {
+            if (elapsed + videos[i].duration > globalPos) {
+                return { index: i, seek: globalPos - elapsed, file: videos[i].file };
+            }
+            elapsed += videos[i].duration;
+        }
+        return { index: 0, seek: 0, file: videos[0].file };
+    }
+
+    async function playSync(forceJump = false) {
+        if (!videos.length) {
+            idleUi.style.display = 'flex'; 
+            video.src = "";
+            return;
+        }
+        idleUi.style.display = 'none';
+
+        const status = getSyncStatus();
+        const filePath = path.join(localFolder, status.file);
+        const currentFile = video.src ? decodeURI(video.src).split(/[\\/]/).pop() : null;
+        
+        if (currentFile !== status.file || forceJump) {
+            video.src = filePath;
+            video.onloadedmetadata = () => {
+                video.currentTime = status.seek;
+                video.play().catch(()=>{});
+                scheduleNext(video.duration - status.seek);
+            };
+        } else {
+            const drift = Math.abs(video.currentTime - status.seek);
+            if (drift > 0.05) video.currentTime = status.seek; 
+            scheduleNext(video.duration - video.currentTime);
+        }
+    }
+
+    function scheduleNext(remain) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = setTimeout(() => playSync(), (remain * 1000) - 50); 
+    }
+
+    async function syncVideos() {
+        console.log("Checking for updates...");
+        try {
+            const res = await fetch(playlistUrl);
+            const list = await res.json();
+            
+            if (list && list.length > 0) {
+                // Download new files
+                for (let v of list) {
+                    const dest = path.join(localFolder, v.file);
+                    if (!fs.existsSync(dest)) {
+                        await new Promise(r => {
+                            const f = fs.createWriteStream(dest);
+                            https.get(v.url, res => { res.pipe(f); f.on('finish', () => { f.close(); r(); }); }).on('error', r);
+                        });
+                    }
+                    v.duration = await new Promise(resolve => {
+                        const temp = document.createElement('video');
+                        temp.src = dest;
+                        temp.onloadedmetadata = () => resolve(temp.duration);
+                        temp.onerror = () => resolve(10);
+                    });
+                }
+                videos = list;
+                startPolling(60000); // Slow poll while playing (1 min)
+                playSync();
+            } else {
+                videos = [];
+                startPolling(10000); // Fast poll when idle (10 sec)
+                playSync();
+            }
+        } catch (err) {
+            console.log("Sync error");
+            startPolling(15000); // Retry error every 15 sec
+        }
+    }
+
+    function startPolling(ms) {
+        if (window.currentPollRate === ms) return;
+        clearInterval(syncInterval);
+        window.currentPollRate = ms;
+        syncInterval = setInterval(syncVideos, ms);
+    }
+
+    // Controls
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight') { timeOffset += 0.01; saveOffset(); }
+        if (e.key === 'ArrowLeft') { timeOffset -= 0.01; saveOffset(); }
+    });
+
+    function saveOffset() {
+        try { fs.writeFileSync(offsetFile, timeOffset.toString()); } catch(e) {}
+        syncUi.innerText = `OFFSET: ${timeOffset > 0 ? '+' : ''}${timeOffset.toFixed(2)}s`;
+        syncUi.style.display = 'block';
+        clearTimeout(window.uiTimer);
+        window.uiTimer = setTimeout(() => syncUi.style.display = 'none', 3000);
+        if (videos.length) playSync(true); 
+    }
+
+    // Initial Start
+    syncVideos();
+</script>
+</body>
+</html>
