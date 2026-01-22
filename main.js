@@ -1,41 +1,52 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, powerSaveBlocker } = require('electron');
 const path = require('path');
-const { autoUpdater } = require("electron-updater"); // ✅ Added this
+const { autoUpdater } = require("electron-updater");
 
-// Configure the updater
+// 1. Update Configuration
 autoUpdater.autoDownload = true;
 autoUpdater.on('update-downloaded', () => {
-  // This forces the app to restart and install the update immediately
-  autoUpdater.quitAndInstall(); 
+    // Reboots the player to the new version automatically
+    autoUpdater.quitAndInstall(); 
+});
+
+autoUpdater.on('error', (err) => {
+    console.log('Update Error: ' + err);
 });
 
 function createWindow() {
-  const win = new BrowserWindow({
-    fullscreen: true,
-    autoHideMenuBar: true,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      autoplayPolicy: 'no-user-gesture-required',
-      additionalArguments: [`--userDataPath=${app.getPath('userData')}`]
-    }
-  });
+    const win = new BrowserWindow({
+        fullscreen: true,
+        autoHideMenuBar: true,
+        backgroundColor: '#000000',
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false,
+            autoplayPolicy: 'no-user-gesture-required',
+            additionalArguments: [
+                `--userDataPath=${app.getPath('userData')}`,
+                `--appVersion=${app.getVersion()}`
+            ]
+        }
+    });
 
-  win.loadFile(path.join(__dirname, 'player.html'));
+    win.loadFile(path.join(__dirname, 'player.html'));
 
-  // ✅ Check for updates as soon as the app starts
-  win.once('ready-to-show', () => {
-    autoUpdater.checkForUpdatesAndNotify();
-  });
+    win.once('ready-to-show', () => {
+        autoUpdater.checkForUpdatesAndNotify();
+    });
 }
 
-app.whenReady().then(createWindow);
+// 2. Prevent sleep and launch
+app.whenReady().then(() => {
+    powerSaveBlocker.start('prevent-display-sleep');
+    createWindow();
+});
 
-// ✅ Check for updates every 60 minutes
+// 3. Periodic update check (Every 60 minutes)
 setInterval(() => {
-  autoUpdater.checkForUpdatesAndNotify();
+    autoUpdater.checkForUpdatesAndNotify();
 }, 3600000);
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+    if (process.platform !== 'darwin') app.quit();
 });
