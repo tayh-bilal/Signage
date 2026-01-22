@@ -1,0 +1,88 @@
+# 📺 Digital Signage Player
+
+A high-performance, auto-updating Electron application designed to synchronize video content across muti screens. This player uses a global clock synchronization method and a Supabase backend to ensure all screens play the same content at the exact same millisecond.
+
+## 🚀 Key Features
+* **Global Sync:** Uses time-offset logic to ensure frame-accurate synchronization across multiple devices.
+* **Dynamic Polling:** * **Idle Mode:** Checks for new content every 10 seconds when no video is assigned.
+    * **Playback Mode:** Checks for updates every 60 minutes to save bandwidth.
+* **Background Auto-Updates:** Downloads new app versions silently and restarts automatically via GitHub Releases.
+* **Hardware-Based Identity:** Automatically generates a unique "Clean ID" from the device's MAC address (e.g., `08EDB99EB573`).
+
+---
+
+## 🛠 Project Structure
+* `main.js`: Controls the Electron process, power management (prevents sleep), and the update engine.
+* `player.html`: The core logic for video rendering, time-syncing, and polling Supabase.
+* `package.json`: Manages dependencies and version control.
+* `.gitignore`: Prevents heavy folders (`node_modules`, `dist`) from bloating the code repository.
+
+---
+
+## 🔄 How to Update the Code (Workflow)
+
+When you need to change the player's behavior or fix a bug, follow these exact steps to update all the screens remotely.
+
+### 1. Edit the Code
+Make your changes locally in `player.html` or `main.js`. Test the changes by running:
+```powershell
+npm start
+
+
+
+2. Increment the Version
+The screens will only update if they detect a higher version number.
+
+Open package.json.
+
+Change "version": "1.0.4" to "version": "1.0.5" (or higher).
+
+3. Build the Installer
+Run the distribution script to package the app for Windows.
+
+PowerShell
+
+npm run dist
+This will generate a dist/ folder containing:
+
+signage-player Setup 1.0.5.exe (The installer)
+
+latest.yml (The "instruction" file for the auto-updater)
+
+
+            
+4. Launch the New Version (GitHub Release)
+The screens monitor the Releases section of this repository.
+Go to your GitHub Repo -> Releases -> Draft a new release.
+Tag version: v1.0.5 (must match package.json).
+Upload Assets: Drag and drop BOTH the .exe and the latest.yml from your dist/ folder.
+Publish Release.
+
+📡 The Update Lifecycle
+Once you click Publish, the following happens automatically:
+Detection: Within 60 minutes, the player checks GitHub and sees a new version is available.
+Silent Download: The player downloads the new installer in the background while the current video continues to play.
+Self-Installation: Once the download is 100% complete, the app calls quitAndInstall().
+Auto-Restart: The app closes, installs the update, and relaunches within 10 seconds.
+Recovery: The player reads the existing screen-config.json, identifies itself, and resumes the playlist.
+
+🔧 New Screen Setup
+Download the latest .exe from the Releases tab.
+Install on a Windows PC.
+On first launch, a Green ID (MAC Address) will appear on the clock screen.
+Add this ID to your Supabase screens table to begin pushing content.
+
+⌨️ Local Controls
+F11: Toggle Fullscreen.
+Arrow Right / Left: Adjust time offset (+/- 0.05s) to fine-tune synchronization.
+Ctrl+R: Force Reload.
+---
+
+### How to save this:
+1.  Create a new file in your `C:\signage-player` folder named `README.md`.
+2.  Paste the text above into it and save.
+3.  Push it to GitHub so it appears on your main page:
+```powershell
+git add README.md
+git commit -m "Added full documentation and update guide"
+git push origin main
