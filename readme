@@ -77,13 +77,37 @@ Add this ID to your Supabase screens table to begin pushing content.
 F11: Toggle Fullscreen.
 Arrow Right / Left: Adjust time offset (+/- 0.05s) to fine-tune synchronization.
 Ctrl+R: Force Reload.
----
 
-### How to save this:
-1.  Create a new file in your `C:\signage-player` folder named `README.md`.
-2.  Paste the text above into it and save.
-3.  Push it to GitHub so it appears on your main page:
-```powershell
-git add README.md
-git commit -m "Added full documentation and update guide"
-git push origin main
+🔧How to install on a new device?
+
+run on powershell
+
+# --- 1. SETTINGS (Check your version number here) ---
+$repo = "tayh-bilal/Signage"
+$version = "1.0.4"
+$assetName = "signage-player.Setup.$version.exe"
+$downloadUrl = "https://github.com/$repo/releases/download/v$version/$assetName"
+$installerPath = "$env:TEMP\SignageInstaller.exe"
+
+# --- 2. DOWNLOAD THE INSTALLER ---
+Write-Host "--- Step 1: Downloading Version $version ---" -ForegroundColor Cyan
+Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath
+
+# --- 3. INSTALL THE APP ---
+Write-Host "--- Step 2: Installing Player ---" -ForegroundColor Green
+Start-Process -FilePath $installerPath -Wait
+
+# --- 4. SET TO LAUNCH ON WINDOWS STARTUP ---
+Write-Host "--- Step 3: Setting up Auto-Startup ---" -ForegroundColor Yellow
+$shortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\SignagePlayer.lnk"
+$exePath = "$env:LOCALAPPDATA\Programs\signage-player\signage-player.exe"
+
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $exePath
+$shortcut.Save()
+
+# --- 5. CLEANUP ---
+Remove-Item $installerPath
+Write-Host "--- SUCCESS! ---" -ForegroundColor White -BackgroundColor DarkGreen
+Write-Host "1. The app should launch now."
