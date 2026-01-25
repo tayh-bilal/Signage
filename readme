@@ -42,7 +42,7 @@ Run the distribution script to package the app for Windows.
 
 PowerShell:
 npm install electron-updater --save
-npm run dist
+npx electron-builder --win
 
 This will generate a dist/ folder containing:
 
