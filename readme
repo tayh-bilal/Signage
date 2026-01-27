@@ -41,8 +41,13 @@ Change "version": "1.0.4" to "version": "1.0.5" (or higher).
 Run the distribution script to package the app for Windows.
 
 PowerShell:
-npm install electron-updater --save
-npx electron-builder --win
+rm -rf node_modules dist
+npm install
+npm run dist
+
+Upload code to GitHub
+
+Upload the installer to GitHub by making a new release.
 
 This will generate a dist/ folder containing:
 
@@ -82,32 +87,76 @@ Ctrl+R: Force Reload.
 
 run on powershell
 
-# --- 1. SETTINGS (Check your version number here) ---
-$repo = "tayh-bilal/Signage"
-$version = "1.0.4"
-$assetName = "signage-player.Setup.$version.exe"
-$downloadUrl = "https://github.com/$repo/releases/download/v$version/$assetName"
-$installerPath = "$env:TEMP\SignageInstaller.exe"
+# ===============================================
+# FULL AUTOMATIC INSTALLER - LATEST RELEASE
+# You control the install path
+# ===============================================
 
-# --- 2. DOWNLOAD THE INSTALLER ---
-Write-Host "--- Step 1: Downloading Version $version ---" -ForegroundColor Cyan
+# --- 1. SETTINGS ---
+$repo = "tayh-bilal/Signage"
+
+# <-- CHANGE THIS to your desired install folder -->
+$installFolder = "C:\SignagePlayer"
+
+# Path where the installer will be downloaded temporarily
+$installerPath = "$env:TEMP\SignagePlayerInstaller.exe"
+
+# Startup shortcut path
+$shortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\SignagePlayer.lnk"
+
+# --- 2. GET LATEST RELEASE INFO FROM GITHUB ---
+Write-Host "--- Step 1: Fetching Latest Release ---" -ForegroundColor Cyan
+$latestRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
+
+# Extract version
+$version = $latestRelease.tag_name.TrimStart("v")  
+
+# Find the installer asset
+$asset = $latestRelease.assets | Where-Object { $_.name -match "SignagePlayer.Setup.*$version.*\.exe" }
+
+if (-not $asset) {
+    Write-Host "❌ Installer for version $version not found in assets!" -ForegroundColor Red
+    exit 1
+}
+
+$downloadUrl = $asset.browser_download_url
+Write-Host "Latest version found: $version" -ForegroundColor Green
+Write-Host "Download URL: $downloadUrl" -ForegroundColor Green
+
+# --- 3. DOWNLOAD THE INSTALLER ---
+Write-Host "--- Step 2: Downloading Installer ---" -ForegroundColor Cyan
 Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath
 
-# --- 3. INSTALL THE APP ---
-Write-Host "--- Step 2: Installing Player ---" -ForegroundColor Green
-Start-Process -FilePath $installerPath -Wait
+# --- 4. CREATE INSTALL FOLDER IF NOT EXIST ---
+if (-not (Test-Path $installFolder)) {
+    New-Item -ItemType Directory -Path $installFolder | Out-Null
+}
 
-# --- 4. SET TO LAUNCH ON WINDOWS STARTUP ---
-Write-Host "--- Step 3: Setting up Auto-Startup ---" -ForegroundColor Yellow
-$shortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\SignagePlayer.lnk"
-$exePath = "$env:LOCALAPPDATA\Programs\signage-player\signage-player.exe"
+# --- 5. RUN INSTALLER SILENTLY ---
+Write-Host "--- Step 3: Installing Player ---" -ForegroundColor Green
 
+# Check if the installer supports custom folder and silent install
+# NSIS common silent flags: /S /D=Path
+Start-Process -FilePath $installerPath -ArgumentList "/S /D=$installFolder" -Wait
+
+# --- 6. FIND THE EXE (in case installer puts it in subfolder like app-1.0.8) ---
+$exePath = Get-ChildItem -Path $installFolder -Recurse -Filter "SignagePlayer.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { $_.FullName }
+
+if (-not $exePath) {
+    Write-Host "❌ Could not find SignagePlayer.exe in $installFolder" -ForegroundColor Red
+    exit 1
+}
+
+# --- 7. CREATE STARTUP SHORTCUT ---
+Write-Host "--- Step 4: Creating Startup Shortcut ---" -ForegroundColor Yellow
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $exePath
 $shortcut.Save()
+Write-Host "✅ Startup shortcut created at $exePath" -ForegroundColor Green
 
-# --- 5. CLEANUP ---
+# --- 8. CLEANUP ---
 Remove-Item $installerPath
 Write-Host "--- SUCCESS! ---" -ForegroundColor White -BackgroundColor DarkGreen
-Write-Host "1. The app should launch now."
+Write-Host "SignagePlayer is installed at $exePath and will launch at startup." -ForegroundColor White
+
