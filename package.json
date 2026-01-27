@@ -1,15 +1,38 @@
 {
   "name": "signage-player",
-  "version": "1.0.5",
-  "description": "Zero-Blink High Precision Sync Player",
+  "version": "1.0.8",
+  "description": "update",
   "author": "tayh-bilal <bilaltayh@gmail.com>",
   "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tayh-bilal/Signage.git"
+  },
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder"
+    "dist": "electron-builder --win",
+    "publish": "electron-builder --win -p always"
+  },
+  "build": {
+    "appId": "com.signage.player",
+    "productName": "SignagePlayer",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "tayh-bilal",
+        "repo": "Signage"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "artifactName": "${productName}.Setup.${version}.${ext}"
+    }
   },
   "devDependencies": {
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.7.3"
   }
 }
