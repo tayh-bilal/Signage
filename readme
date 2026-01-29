@@ -92,80 +92,43 @@ run on powershell
 # You control the install path
 # ===============================================
 
-# --- 1. SETTINGS ---
+# ---------------- SETTINGS ----------------
 $repo = "tayh-bilal/Signage"
-
-# <-- CHANGE THIS to your desired install folder -->
-$installFolder = "C:\SignagePlayer"
-
-# Path where the installer will be downloaded temporarily
+$installFolder = "$env:LOCALAPPDATA\Programs\signage-player"
 $installerPath = "$env:TEMP\SignagePlayerInstaller.exe"
-
-# Startup shortcut path
 $shortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\SignagePlayer.lnk"
 
-# --- 2. GET LATEST RELEASE INFO FROM GITHUB ---
-Write-Host "--- Step 1: Fetching Latest Release ---" -ForegroundColor Cyan
-$latestRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
+# ---------------- GET LATEST RELEASE ----------------
+$latestRelease = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
+$version = $latestRelease.tag_name.TrimStart("v")
 
-# Extract version
-$version = $latestRelease.tag_name.TrimStart("v")  
-
-# Find the installer asset
-$asset = $latestRelease.assets | Where-Object { $_.name -match "SignagePlayer.Setup.*$version.*\.exe" }
-
-if (-not $asset) {
-    Write-Host "❌ Installer for version $version not found in assets!" -ForegroundColor Red
-    exit 1
+$asset = $latestRelease.assets | Where-Object {
+    $_.name -match "SignagePlayer.Setup.*$version.*\.exe"
 }
 
-$downloadUrl = $asset.browser_download_url
-Write-Host "Latest version found: $version" -ForegroundColor Green
-Write-Host "Download URL: $downloadUrl" -ForegroundColor Green
+if (-not $asset) { throw "Installer not found" }
 
-# --- 3. DOWNLOAD THE INSTALLER ---
-Write-Host "--- Step 2: Downloading Installer ---" -ForegroundColor Cyan
-Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath
+# ---------------- DOWNLOAD ----------------
+Invoke-WebRequest $asset.browser_download_url -OutFile $installerPath
 
-# --- 4. CREATE INSTALL FOLDER IF NOT EXIST ---
-if (-not (Test-Path $installFolder)) {
-    New-Item -ItemType Directory -Path $installFolder | Out-Null
-}
+# ---------------- INSTALL ----------------
+Start-Process $installerPath -ArgumentList "/S /D=$installFolder" -Wait
 
-# --- 5. RUN INSTALLER SILENTLY ---
-Write-Host "--- Step 3: Installing Player ---" -ForegroundColor Green
+# ---------------- STARTUP ----------------
+$exePath = "$installFolder\SignagePlayer.exe"
 
-# Check if the installer supports custom folder and silent install
-# NSIS common silent flags: /S /D=Path
-Start-Process -FilePath $installerPath -ArgumentList "/S /D=$installFolder" -Wait
-
-# --- 6. FIND THE EXE (in case installer puts it in subfolder like app-1.0.8) ---
-$exePath = Get-ChildItem -Path $installFolder -Recurse -Filter "SignagePlayer.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { $_.FullName }
-
-if (-not $exePath) {
-    Write-Host "❌ Could not find SignagePlayer.exe in $installFolder" -ForegroundColor Red
-    exit 1
-}
-
-# --- 7. CREATE STARTUP SHORTCUT ---
-Write-Host "--- Step 4: Creating Startup Shortcut ---" -ForegroundColor Yellow
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $exePath
 $shortcut.Save()
-Write-Host "✅ Startup shortcut created at $exePath" -ForegroundColor Green
 
-# --- 8. CLEANUP ---
-Remove-Item $installerPath
-Write-Host "--- SUCCESS! ---" -ForegroundColor White -BackgroundColor DarkGreen
-Write-Host "SignagePlayer is installed at $exePath and will launch at startup." -ForegroundColor White
+Remove-Item $installerPath -Force
 
 
-# --- 9. kiosk mode ---
-# 1. Define the app path
-$correctExe = "$env:LOCALAPPDATA\Programs\signage-player\SignagePlayer.exe"
+# AFTER MAKING SURE THE APP RUN, RUN KIOSK MODE
+$exePath = "$env:LOCALAPPDATA\Programs\signage-player\SignagePlayer.exe"
 
-$registryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
-Set-ItemProperty -Path $registryPath -Name "Shell" -Value $correctExe
-
-Write-Host "Shell updated to $correctExe" -ForegroundColor Green
+Set-ItemProperty `
+  -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System" `
+  -Name "Shell" `
+  -Value $exePath
