@@ -163,16 +163,9 @@ Write-Host "SignagePlayer is installed at $exePath and will launch at startup." 
 
 # --- 9. kiosk mode ---
 # 1. Define the app path
-$appPath = "$env:LOCALAPPDATA\Programs\signage-player\signage-player.exe"
+$correctExe = "$env:LOCALAPPDATA\Programs\signage-player\SignagePlayer.exe"
 
-# 2. Check if the folder exists, if not, create it
 $registryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
-if (!(Test-Path $registryPath)) {
-    New-Item -Path $registryPath -Force | Out-Null
-    Write-Host "Created Registry folder: System" -ForegroundColor Cyan
-}
+Set-ItemProperty -Path $registryPath -Name "Shell" -Value $correctExe
 
-# 3. Set the app as the Shell
-Set-ItemProperty -Path $registryPath -Name "Shell" -Value $appPath
-Write-Host "Success! Your app is now the Windows Shell." -ForegroundColor Green
-Write-Host "Restart the computer to see Kiosk Mode in action." -ForegroundColor Yellow
+Write-Host "Shell updated to $correctExe" -ForegroundColor Green
