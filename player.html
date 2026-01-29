@@ -58,10 +58,21 @@
     const idleMsTxt = document.getElementById('idle-ms');
     const idleIdTxt = document.getElementById('idle-id');
     
-    const localFolder = path.join(__dirname, 'videos');
-    if (!fs.existsSync(localFolder)) {
-        try { fs.mkdirSync(localFolder); } catch(e) {}
+
+// Change this line to use baseDir instead of __dirname
+const localFolder = path.join(baseDir, 'videos'); 
+
+if (!fs.existsSync(localFolder)) {
+    try { 
+        fs.mkdirSync(localFolder, { recursive: true }); 
+        console.log("Created videos folder at:", localFolder);
+    } catch(e) { 
+        console.error("Folder creation failed:", e); 
     }
+}
+
+
+
 
     // --- ID LOGIC (AUTO-CLEANING) ---
     const configPath = path.join(baseDir, 'screen-config.json');
