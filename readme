@@ -160,3 +160,10 @@ Remove-Item $installerPath
 Write-Host "--- SUCCESS! ---" -ForegroundColor White -BackgroundColor DarkGreen
 Write-Host "SignagePlayer is installed at $exePath and will launch at startup." -ForegroundColor White
 
+
+# --- 9. kiosk mode ---
+# Define the path to your installed app
+$appPath = "$env:LOCALAPPDATA\Programs\signage-player\signage-player.exe"
+
+# Change the Windows Shell for the current user
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System" -Name "Shell" -Value $appPath
