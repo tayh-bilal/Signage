@@ -1,11 +1,25 @@
 const { app, BrowserWindow, powerSaveBlocker, ipcMain } = require('electron');
 const path = require('path');
 
-// 🛡️ FIX: FORCE WORKING DIRECTORY
-// This fixes the "Cannot find module" error in Kiosk mode by forcing the app
-// to look in its own folder instead of System32.
+// 🛡️ FIX 1: FORCE WORKING DIRECTORY
 if (app.isPackaged) {
     process.chdir(path.dirname(process.execPath));
+}
+
+// 🛡️ FIX 2: SINGLE INSTANCE LOCK
+// This stops the "Double App" issue after updates
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    app.quit();
+} else {
+    // If a second instance launches, focus the existing one
+    app.on('second-instance', () => {
+        const windows = BrowserWindow.getAllWindows();
+        if (windows.length) {
+            if (windows[0].isMinimized()) windows[0].restore();
+            windows[0].focus();
+        }
+    });
 }
 
 let autoUpdater = null;
@@ -36,33 +50,37 @@ ipcMain.on('trigger-update', () => {
     }
 });
 
-app.whenReady().then(() => {
-    powerSaveBlocker.start('prevent-display-sleep');
-    createWindow();
+// Only continue if we have the Single Instance Lock
+if (gotTheLock) {
+    app.whenReady().then(() => {
+        powerSaveBlocker.start('prevent-display-sleep');
+        createWindow();
 
-    // 🛡️ FIX: LAZY LOAD UPDATER
-    // Wait 10 seconds before initializing the updater to avoid boot crashes.
-    setTimeout(() => {
-        try {
-            autoUpdater = require('electron-updater').autoUpdater;
-            autoUpdater.autoDownload = true;
+        // 🛡️ FIX 3: LAZY LOAD UPDATER
+        // Wait 10 seconds to ensure Kiosk environment is stable
+        setTimeout(() => {
+            try {
+                autoUpdater = require('electron-updater').autoUpdater;
+                autoUpdater.autoDownload = true;
 
-            autoUpdater.on('update-downloaded', () => {
-                console.log('Update downloaded. Rebooting...');
-                autoUpdater.quitAndInstall(true, true);
-            });
+                autoUpdater.on('update-downloaded', () => {
+                    console.log('Update downloaded. Installing...');
+                    // force=true, isSilent=true
+                    autoUpdater.quitAndInstall(true, true); 
+                });
 
-            autoUpdater.on('error', (err) => {
-                console.log('Update Error: ' + err);
-            });
+                autoUpdater.on('error', (err) => {
+                    console.log('Update Error: ' + err);
+                });
 
-            console.log("Updater initialized.");
-        } catch (e) {
-            console.log('Updater failed to load:', e);
-        }
-    }, 10000); 
-});
+                console.log("Updater initialized.");
+            } catch (e) {
+                console.log('Updater failed to load:', e);
+            }
+        }, 10000); 
+    });
 
-app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
-});
+    app.on('window-all-closed', () => {
+        if (process.platform !== 'darwin') app.quit();
+    });
+}
