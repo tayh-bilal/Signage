@@ -1,24 +1,14 @@
 const { app, BrowserWindow, powerSaveBlocker, ipcMain } = require('electron');
 const path = require('path');
 
-let autoUpdater;
-
-// 🛡️ Setup Updater (Passive Mode)
-try {
-    autoUpdater = require('electron-updater').autoUpdater;
-    autoUpdater.autoDownload = true;
-
-    autoUpdater.on('update-downloaded', () => {
-        console.log('Update downloaded. Rebooting...');
-        autoUpdater.quitAndInstall();
-    });
-
-    autoUpdater.on('error', (err) => {
-        console.log('Update Error: ' + err);
-    });
-} catch (e) {
-    console.log('electron-updater not available');
+// 🛡️ FIX: FORCE WORKING DIRECTORY
+// This fixes the "Cannot find module" error in Kiosk mode by forcing the app
+// to look in its own folder instead of System32.
+if (app.isPackaged) {
+    process.chdir(path.dirname(process.execPath));
 }
+
+let autoUpdater = null;
 
 function createWindow() {
     const win = new BrowserWindow({
@@ -29,7 +19,6 @@ function createWindow() {
             nodeIntegration: true,
             contextIsolation: false,
             autoplayPolicy: 'no-user-gesture-required',
-            // Pass the current version to the HTML file
             additionalArguments: [
                 `--userDataPath=${app.getPath('userData')}`,
                 `--appVersion=${app.getVersion()}` 
@@ -40,7 +29,6 @@ function createWindow() {
     win.loadFile(path.join(__dirname, 'player.html'));
 }
 
-// 👂 Listen for the trigger from the HTML file
 ipcMain.on('trigger-update', () => {
     if (autoUpdater) {
         console.log("Renderer requested update check...");
@@ -51,6 +39,28 @@ ipcMain.on('trigger-update', () => {
 app.whenReady().then(() => {
     powerSaveBlocker.start('prevent-display-sleep');
     createWindow();
+
+    // 🛡️ FIX: LAZY LOAD UPDATER
+    // Wait 10 seconds before initializing the updater to avoid boot crashes.
+    setTimeout(() => {
+        try {
+            autoUpdater = require('electron-updater').autoUpdater;
+            autoUpdater.autoDownload = true;
+
+            autoUpdater.on('update-downloaded', () => {
+                console.log('Update downloaded. Rebooting...');
+                autoUpdater.quitAndInstall(true, true);
+            });
+
+            autoUpdater.on('error', (err) => {
+                console.log('Update Error: ' + err);
+            });
+
+            console.log("Updater initialized.");
+        } catch (e) {
+            console.log('Updater failed to load:', e);
+        }
+    }, 10000); 
 });
 
 app.on('window-all-closed', () => {

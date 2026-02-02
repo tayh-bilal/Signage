@@ -40,7 +40,7 @@
     const os = require('os');
     const { ipcRenderer } = require('electron');
 
-    // --- GET CURRENT APP VERSION ---
+    // --- GET VERSION ---
     const versionArg = process.argv.find(arg => arg.startsWith('--appVersion='));
     const currentAppVersion = versionArg ? versionArg.split('=')[1] : '0.0.0';
     console.log(`Current App Version: ${currentAppVersion}`);
@@ -95,7 +95,7 @@
 
     // --- SYNC VARIABLES ---
     let timeOffset = 0; 
-    let serverTimeOffset = 0; // <--- NEW: Stores the calculated drift from the server
+    let serverTimeOffset = 0; // Stores precision drift
 
     const offsetFile = path.join(baseDir, 'time_offset.txt');
     if (fs.existsSync(offsetFile)) {
@@ -111,7 +111,7 @@
 
     // --- CLOCK UI ---
     setInterval(() => {
-        // <--- UPDATED: Uses Server Time for display so you can verify sync
+        // Display Server Time for visual confirmation
         const now = new Date(Date.now() + serverTimeOffset + (timeOffset * 1000));
         idleTimeTxt.innerText = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
         idleMsTxt.innerText = `.${String(now.getMilliseconds()).padStart(3,'0')}`;
@@ -121,7 +121,7 @@
         if (!videos.length) return null;
         const totalDuration = videos.reduce((acc, v) => acc + (v.duration || 0), 0);
         
-        // <--- UPDATED: The Core Logic. Uses Server Time + Manual Offset
+        // 🚀 CRITICAL: Use Server Time + Offset
         const now = ((Date.now() + serverTimeOffset) / 1000) + timeOffset; 
         
         const globalPos = now % totalDuration;
@@ -155,7 +155,8 @@
             };
         } else {
             const drift = Math.abs(video.currentTime - status.seek);
-            if (drift > 0.05) video.currentTime = status.seek; 
+            // 🚀 TIGHTER SYNC: Correct if off by more than 20ms (was 50ms)
+            if (drift > 0.02) video.currentTime = status.seek; 
             scheduleNext(video.duration - video.currentTime);
         }
     }
@@ -166,29 +167,27 @@
     }
 
     async function syncVideos() {
-        console.log("Checking playlist & syncing clock...");
+        console.log("Checking playlist...");
         try {
+            // 🚀 PRECISION LATENCY MEASUREMENT
+            const requestStart = Date.now();
             const res = await fetch(playlistUrl);
-            
-            // --- 🚀 NEW PRECISION SYNC LOGIC ---
+            const requestEnd = Date.now();
+            const networkDelay = (requestEnd - requestStart) / 2;
+
             const serverDateStr = res.headers.get('Date');
             if (serverDateStr) {
                 const serverTime = new Date(serverDateStr).getTime();
-                const now = Date.now();
-                
-                // Estimate 200ms latency for request/response round trip
-                const latency = 200; 
-                
-                // Calculate exactly how far off this PC is from the Server
-                serverTimeOffset = serverTime - (now - (latency / 2));
-                
-                console.log(`⏱️ Clock Synced! Local drift corrected by: ${serverTimeOffset}ms`);
+                // Don't sync if network is unstable (>1s latency)
+                if ((requestEnd - requestStart) < 1000) {
+                     serverTimeOffset = serverTime - (requestEnd - networkDelay);
+                     console.log(`⏱️ Precision Sync: Latency ${Math.round(networkDelay)}ms. Offset adjusted.`);
+                }
             }
-            // ----------------------------------
 
             const data = await res.json(); 
             
-            // --- AUTO-UPDATE LOGIC ---
+            // --- UPDATE CHECK ---
             if (data.version) {
                 const remoteVer = data.version.replace('v', '');
                 const localVer = currentAppVersion.replace('v', '');
@@ -202,7 +201,6 @@
             const list = data.videos || [];
 
             if (list.length > 0) {
-                // Download new files
                 for (let v of list) {
                     const dest = path.join(localFolder, v.file);
                     if (!fs.existsSync(dest)) {
@@ -211,6 +209,7 @@
                             https.get(v.url, res => { res.pipe(f); f.on('finish', () => { f.close(); r(); }); }).on('error', r);
                         });
                     }
+                    // Recalculate duration
                     v.duration = await new Promise(resolve => {
                         const temp = document.createElement('video');
                         temp.src = dest;
@@ -239,7 +238,6 @@
         syncInterval = setInterval(syncVideos, ms);
     }
 
-    // Controls
     window.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowRight') { timeOffset += 0.01; saveOffset(); }
         if (e.key === 'ArrowLeft') { timeOffset -= 0.01; saveOffset(); }
@@ -254,7 +252,6 @@
         if (videos.length) playSync(true); 
     }
 
-    // Initial Start
     syncVideos();
 </script>
 </body>
