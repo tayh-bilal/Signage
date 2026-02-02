@@ -92,37 +92,64 @@ run on powershell
 # You control the install path
 # ===============================================
 
-# ---------------- SETTINGS ----------------
+# ===============================================
+#  AUTO-INSTALLER (RESILIENT VERSION)
+# ===============================================
+
+# 1. SETTINGS
 $repo = "tayh-bilal/Signage"
 $installFolder = "$env:LOCALAPPDATA\Programs\signage-player"
 $installerPath = "$env:TEMP\SignagePlayerInstaller.exe"
 $shortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\SignagePlayer.lnk"
 
-# ---------------- GET LATEST RELEASE ----------------
-$latestRelease = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
-$version = $latestRelease.tag_name.TrimStart("v")
+Write-Host "Checking for updates..." -ForegroundColor Cyan
 
-$asset = $latestRelease.assets | Where-Object {
-    $_.name -match "SignagePlayer.Setup.*$version.*\.exe"
+# 2. GET LATEST RELEASE (Ignore Drafts)
+try {
+    $latestRelease = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
+} catch {
+    Write-Host "ERROR: Could not find any releases on GitHub. Is the repo public?" -ForegroundColor Red
+    return
 }
 
-if (-not $asset) { throw "Installer not found" }
+Write-Host "Found Version: $($latestRelease.tag_name)" -ForegroundColor Green
 
-# ---------------- DOWNLOAD ----------------
+# 3. FIND ANY .EXE FILE (Don't worry about the exact name)
+$asset = $latestRelease.assets | Where-Object { $_.name -like "*.exe" } | Select-Object -First 1
+
+if (-not $asset) { 
+    Write-Host "CRITICAL ERROR: No .exe file found in release $($latestRelease.tag_name)!" -ForegroundColor Red
+    Write-Host "Available files:"
+    $latestRelease.assets | ForEach-Object { Write-Host " - $($_.name)" -ForegroundColor Yellow }
+    return 
+}
+
+Write-Host "Downloading: $($asset.name)..." -ForegroundColor Cyan
+
+# 4. DOWNLOAD
 Invoke-WebRequest $asset.browser_download_url -OutFile $installerPath
 
-# ---------------- INSTALL ----------------
+# 5. INSTALL
+Write-Host "Installing..." -ForegroundColor Cyan
 Start-Process $installerPath -ArgumentList "/S /D=$installFolder" -Wait
 
-# ---------------- STARTUP ----------------
+# 6. CREATE STARTUP SHORTCUT
 $exePath = "$installFolder\SignagePlayer.exe"
+if (Test-Path $exePath) {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $exePath
+    $shortcut.Save()
+    Write-Host "Success! Installation Complete." -ForegroundColor Green
+    
+    # Optional: Launch it immediately
+    Start-Process $exePath
+} else {
+    Write-Host "Error: Installation finished but exe not found at $exePath" -ForegroundColor Red
+}
 
-$shell = New-Object -ComObject WScript.Shell
-$shortcut = $shell.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = $exePath
-$shortcut.Save()
-
-Remove-Item $installerPath -Force
+# Cleanup
+Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
 
 
 # AFTER MAKING SURE THE APP RUN, RUN KIOSK MODE
