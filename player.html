@@ -115,6 +115,7 @@
 
     // --- CLOCK UI ---
     setInterval(() => {
+        // Display Server Time for visual confirmation
         const now = new Date(Date.now() + serverTimeOffset + (timeOffset * 1000));
         idleTimeTxt.innerText = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
         idleMsTxt.innerText = `.${String(now.getMilliseconds()).padStart(3,'0')}`;
@@ -124,7 +125,7 @@
         if (!videos.length) return null;
         const totalDuration = videos.reduce((acc, v) => acc + (v.duration || 0), 0);
         
-        // Use Server Time + Offset
+        // 🚀 PRECISION: Use Server Time + Offset
         const now = ((Date.now() + serverTimeOffset) / 1000) + timeOffset; 
         
         const globalPos = now % totalDuration;
@@ -158,8 +159,16 @@
             };
         } else {
             const drift = Math.abs(video.currentTime - status.seek);
-            // Correct if off by more than 20ms
+            
+            // 1. SYNC CORRECTION
             if (drift > 0.02) video.currentTime = status.seek; 
+
+            // 2. ANTI-FREEZE CHECK (Forces play if accidentally paused)
+            if (video.paused) {
+                console.log("⚠️ Video paused unexpectedly. Resuming...");
+                video.play().catch(()=>{});
+            }
+
             scheduleNext(video.duration - video.currentTime);
         }
     }
@@ -221,7 +230,6 @@
         }
     }
 
-    // --- THIS IS THE PART YOU WERE MISSING ---
     async function processPlaylist(data) {
         const list = data.videos || [];
         if (list.length > 0) {
@@ -249,7 +257,6 @@
                     temp.onerror = () => resolve(0); 
                 });
             }
-            // Filter out broken videos
             videos = list.filter(v => v.duration > 0);
             startPolling(60000); 
             playSync();
@@ -281,7 +288,6 @@
         if (videos.length) playSync(true); 
     }
 
-    // Start the engine
     syncVideos();
 </script>
 </body>

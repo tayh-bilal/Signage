@@ -1,12 +1,17 @@
 const { app, BrowserWindow, powerSaveBlocker, ipcMain } = require('electron');
 const path = require('path');
 
-// 🛡️ FIX 1: FORCE WORKING DIRECTORY
+// 🛡️ FIX 1: DISABLE HARDWARE ACCELERATION
+// This stops the video from randomly freezing on some screens
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-software-rasterizer');
+
+// 🛡️ FIX 2: FORCE WORKING DIRECTORY
 if (app.isPackaged) {
     process.chdir(path.dirname(process.execPath));
 }
 
-// 🛡️ FIX 2: SINGLE INSTANCE LOCK
+// 🛡️ FIX 3: SINGLE INSTANCE LOCK
 // This stops the "Double App" issue after updates
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -56,7 +61,7 @@ if (gotTheLock) {
         powerSaveBlocker.start('prevent-display-sleep');
         createWindow();
 
-        // 🛡️ FIX 3: LAZY LOAD UPDATER
+        // 🛡️ FIX 4: LAZY LOAD UPDATER
         // Wait 10 seconds to ensure Kiosk environment is stable
         setTimeout(() => {
             try {
