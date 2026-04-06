@@ -34,7 +34,7 @@
     <video id="videoPlayer" autoplay></video>
 
 <script>
-   const fs = require('fs');
+    const fs = require('fs');
     const path = require('path');
     const https = require('https');
     const os = require('os');
@@ -48,37 +48,69 @@
 
     const video = document.getElementById('videoPlayer');
     const idleUi = document.getElementById('idle-ui');
+    const idleTimeTxt = document.getElementById('idle-time');
+    const idleMsTxt = document.getElementById('idle-ms');
+    const idleIdTxt = document.getElementById('idle-id');
     const playlistCachePath = path.join(baseDir, 'last_playlist.json');
 
     let videos = [];
     let timeOffset = 0;
     let watchdogTimer = null;
+    let screenId = "default";
 
-    // --- 1. BOOTSTRAP: Load from Disk Immediately ---
+    // --- ID GENERATION (Restored) ---
+    function generateUniqueId() {
+        const interfaces = os.networkInterfaces();
+        let macPart = '000000000000';
+        for (let name in interfaces) {
+            for (let iface of interfaces[name]) {
+                if (!iface.internal && iface.mac !== '00:00:00:00:00:00') {
+                    macPart = iface.mac.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+                    break;
+                }
+            }
+        }
+        return macPart; 
+    }
+
+    const configPath = path.join(baseDir, 'screen-config.json');
+    try {
+        if (fs.existsSync(configPath)) {
+            let data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            screenId = data.screenId;
+        } else {
+            screenId = generateUniqueId();
+            fs.writeFileSync(configPath, JSON.stringify({ screenId: screenId }));
+        }
+    } catch(e) { screenId = "ERR-ID"; }
+    idleIdTxt.innerText = `SCREEN ID: ${screenId}`;
+
+    // --- CLOCK ANIMATION (Restored) ---
+    setInterval(() => {
+        const now = new Date(Date.now() + (timeOffset * 1000));
+        idleTimeTxt.innerText = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+        idleMsTxt.innerText = `.${String(now.getMilliseconds()).padStart(3,'0')}`;
+    }, 16);
+
+    // --- 1. BOOTSTRAP: Load from Disk ---
     function bootstrap() {
         try {
             if (fs.existsSync(playlistCachePath)) {
                 const cached = JSON.parse(fs.readFileSync(playlistCachePath, 'utf8'));
                 if (Array.isArray(cached) && cached.length > 0) {
                     videos = cached;
-                    console.log("✅ Loaded cached playlist:", videos.length, "items");
+                    console.log("Loaded cached playlist.");
                 }
             }
-        } catch (e) {
-            console.error("❌ Cache read error:", e);
-        }
+        } catch (e) { console.error("Cache read error:", e); }
         
-        // Start playback even if we have no videos (will show Idle UI)
         playSync(true); 
-        // Start looking for updates
         syncVideos();
     }
 
     // --- 2. PLAYBACK ENGINE ---
     async function playSync(forceJump = false) {
-        // If no videos, show the Green Clock/ID screen
         if (!videos || videos.length === 0) {
-            console.warn("⚠️ No videos in playlist. Showing Clock.");
             idleUi.style.display = 'flex';
             video.style.display = 'none';
             video.src = "";
@@ -90,10 +122,10 @@
 
         const filePath = path.join(localFolder, status.file);
 
-        // CHECK IF FILE EXISTS - If it doesn't, we can't play it!
         if (!fs.existsSync(filePath)) {
-            console.error("🚫 Missing File:", status.file);
-            // If file is missing, try next video or wait for sync
+            console.error("Missing File:", status.file);
+            // If the file hasn't downloaded yet, try again in a few seconds
+            setTimeout(() => playSync(true), 5000);
             return;
         }
 
@@ -103,7 +135,7 @@
         const currentFile = video.src ? decodeURI(video.src).split(/[\\/]/).pop() : null;
 
         if (currentFile !== status.file || forceJump) {
-            video.src = `file://${filePath}`; // Use file:// protocol for local paths
+            video.src = `file://${filePath}`; 
             video.onloadedmetadata = () => {
                 video.currentTime = status.seek;
                 video.play().catch(e => console.error("Playback failed:", e));
@@ -135,7 +167,6 @@
 
     function scheduleNext(remain) {
         clearTimeout(watchdogTimer);
-        // Safety: don't set negative timeouts
         const delay = Math.max(10, (remain * 1000) - 50);
         watchdogTimer = setTimeout(() => playSync(), delay);
     }
@@ -144,29 +175,27 @@
     async function syncVideos() {
         try {
             const res = await fetch(`https://itguodvoatxhbibfvjch.supabase.co/functions/v1/playlist?screenId=${screenId}`);
+            if (!res.ok) throw new Error("Server error");
             const data = await res.json();
             const newList = data.videos || [];
 
             if (newList.length > 0) {
                 for (let v of newList) {
                     const dest = path.join(localFolder, v.file);
-                    // Download if missing
                     if (!fs.existsSync(dest)) {
                         await downloadFile(v.url, dest);
                     }
-                    // Get duration and CLEAN UP
                     v.duration = await getVideoDuration(dest);
                 }
                 
                 videos = newList;
                 fs.writeFileSync(playlistCachePath, JSON.stringify(videos));
-                console.log("✨ Playlist updated and saved.");
-                playSync();
+                playSync(); // Trigger playback with new list
             }
         } catch (err) {
-            console.log("🌐 Sync skipped (Offline or Error)");
+            console.log("Sync skipped (Offline or Server Error)");
         } finally {
-            setTimeout(syncVideos, 60000); // Poll every minute
+            setTimeout(syncVideos, 60000); 
         }
     }
 
@@ -181,10 +210,10 @@
         });
     }
 
-    function getVideoDuration(path) {
+    function getVideoDuration(filePath) {
         return new Promise(resolve => {
             const temp = document.createElement('video');
-            temp.src = `file://${path}`;
+            temp.src = `file://${filePath}`;
             temp.onloadedmetadata = () => {
                 const d = temp.duration;
                 temp.src = ""; temp.remove();
@@ -197,12 +226,12 @@
     // Emergency Watchdog
     setInterval(() => {
         if (videos.length > 0 && (video.paused || video.readyState < 2)) {
-            console.log("🚑 Recovery triggered: video was stuck/black.");
             playSync(true);
         }
     }, 5000);
 
     bootstrap();
+
 </script>
 
 </body>
