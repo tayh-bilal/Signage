@@ -12,6 +12,7 @@
             display: flex; flex-direction: column; justify-content: center; align-items: center;
             color: #0f0; font-family: 'Courier New', monospace; background: black; z-index: 500;
             display: none; 
+            text-align: center;
         }
         #idle-time { font-size: 120px; font-weight: bold; margin-bottom: 5px; }
         #idle-ms { font-size: 50px; margin-bottom: 50px; opacity: 0.8; }
@@ -40,6 +41,11 @@
     const os = require('os');
     const { ipcRenderer } = require('electron');
 
+    // --- APP VERSION INFO ---
+    const versionArg = process.argv.find(arg => arg.startsWith('--appVersion='));
+    const currentAppVersion = versionArg ? versionArg.split('=')[1] : '0.0.0';
+    let updateTriggered = false;
+
     // --- CONFIG ---
     const isPackaged = !process.defaultApp;
     const baseDir = isPackaged ? path.join(process.env.APPDATA, 'ZeroBlinkPlayer') : __dirname;
@@ -51,48 +57,107 @@
     const idleTimeTxt = document.getElementById('idle-time');
     const idleMsTxt = document.getElementById('idle-ms');
     const idleIdTxt = document.getElementById('idle-id');
+    const syncUi = document.getElementById('sync-ui');
+    
+    const configPath = path.join(baseDir, 'screen-config.json');
     const playlistCachePath = path.join(baseDir, 'last_playlist.json');
+    const offsetFile = path.join(baseDir, 'time_offset.txt');
 
     let videos = [];
     let timeOffset = 0;
     let watchdogTimer = null;
-    let screenId = "default";
+    let screenId = null;
+    let clockInterval = null;
 
-    // --- ID GENERATION (Restored) ---
-    function generateUniqueId() {
+    // Load Sync Offset
+    if (fs.existsSync(offsetFile)) {
+        try { timeOffset = parseFloat(fs.readFileSync(offsetFile, 'utf8')) || 0; } catch(e) {}
+    }
+
+    // --- 1. INITIALIZATION & ID CHECK ---
+    function getValidId() {
+        try {
+            if (fs.existsSync(configPath)) {
+                let data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+                if (data.screenId && data.screenId !== '000000000000') {
+                    return data.screenId;
+                }
+            }
+        } catch (e) { console.log("No valid config found."); }
+
         const interfaces = os.networkInterfaces();
-        let macPart = '000000000000';
         for (let name in interfaces) {
             for (let iface of interfaces[name]) {
-                if (!iface.internal && iface.mac !== '00:00:00:00:00:00') {
-                    macPart = iface.mac.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-                    break;
+                if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
+                    const newId = iface.mac.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+                    fs.writeFileSync(configPath, JSON.stringify({ screenId: newId }));
+                    return newId;
                 }
             }
         }
-        return macPart; 
+        return null;
     }
 
-    const configPath = path.join(baseDir, 'screen-config.json');
-    try {
-        if (fs.existsSync(configPath)) {
-            let data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-            screenId = data.screenId;
-        } else {
-            screenId = generateUniqueId();
-            fs.writeFileSync(configPath, JSON.stringify({ screenId: screenId }));
+    function startApp() {
+        screenId = getValidId();
+
+        if (!screenId) {
+            showNetworkError();
+            setTimeout(startApp, 5000); 
+            return;
         }
-    } catch(e) { screenId = "ERR-ID"; }
-    idleIdTxt.innerText = `SCREEN ID: ${screenId}`;
 
-    // --- CLOCK ANIMATION (Restored) ---
-    setInterval(() => {
-        const now = new Date(Date.now() + (timeOffset * 1000));
-        idleTimeTxt.innerText = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
-        idleMsTxt.innerText = `.${String(now.getMilliseconds()).padStart(3,'0')}`;
-    }, 16);
+        restoreNormalUi();
+        idleIdTxt.innerText = `SCREEN ID: ${screenId}`;
+        bootstrap();
+    }
 
-    // --- 1. BOOTSTRAP: Load from Disk ---
+    // --- UI STATES ---
+    function showNetworkError() {
+        clearInterval(clockInterval); 
+        idleUi.style.display = 'flex';
+        video.style.display = 'none';
+        video.src = "";
+        
+        idleTimeTxt.innerText = "NO CONNECTION";
+        idleTimeTxt.style.color = "#ff0000"; 
+        idleMsTxt.innerText = "";
+        
+        idleIdTxt.innerText = "PLEASE CONNECT CABLE OR WI-FI";
+        idleIdTxt.style.color = "#ff0000";
+        idleIdTxt.style.borderColor = "#ff0000";
+    }
+
+    function showUnregisteredError() {
+        clearInterval(clockInterval); 
+        idleUi.style.display = 'flex';
+        video.style.display = 'none';
+        video.src = "";
+        
+        idleTimeTxt.innerText = "UNREGISTERED";
+        idleTimeTxt.style.color = "#ff9900"; 
+        idleMsTxt.innerText = "";
+        
+        // Show the MAC Address instead of the error message
+        idleIdTxt.innerText = `ID: ${screenId}`; 
+        idleIdTxt.style.color = "#ff9900";
+        idleIdTxt.style.borderColor = "#ff9900";
+    }
+
+    function restoreNormalUi() {
+        idleTimeTxt.style.color = "#0f0"; 
+        idleIdTxt.style.color = "#0f0";
+        idleIdTxt.style.borderColor = "#0f0";
+        
+        clearInterval(clockInterval);
+        clockInterval = setInterval(() => {
+            const now = new Date(Date.now() + (timeOffset * 1000));
+            idleTimeTxt.innerText = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+            idleMsTxt.innerText = `.${String(now.getMilliseconds()).padStart(3,'0')}`;
+        }, 16);
+    }
+
+    // --- 2. BOOTSTRAP: Load from Disk ---
     function bootstrap() {
         try {
             if (fs.existsSync(playlistCachePath)) {
@@ -105,15 +170,16 @@
         } catch (e) { console.error("Cache read error:", e); }
         
         playSync(true); 
-        syncVideos();
+        syncVideos();   
     }
 
-    // --- 2. PLAYBACK ENGINE ---
+    // --- 3. PLAYBACK ENGINE ---
     async function playSync(forceJump = false) {
         if (!videos || videos.length === 0) {
-            idleUi.style.display = 'flex';
-            video.style.display = 'none';
-            video.src = "";
+            if (idleTimeTxt.innerText !== "UNREGISTERED" && idleTimeTxt.innerText !== "NO CONNECTION") {
+                idleUi.style.display = 'flex';
+                video.style.display = 'none';
+            }
             return;
         }
 
@@ -123,8 +189,6 @@
         const filePath = path.join(localFolder, status.file);
 
         if (!fs.existsSync(filePath)) {
-            console.error("Missing File:", status.file);
-            // If the file hasn't downloaded yet, try again in a few seconds
             setTimeout(() => playSync(true), 5000);
             return;
         }
@@ -171,12 +235,40 @@
         watchdogTimer = setTimeout(() => playSync(), delay);
     }
 
-    // --- 3. HARDENED SYNC ---
+    // --- 4. HARDENED SYNC (With Auto-Update) ---
     async function syncVideos() {
         try {
             const res = await fetch(`https://itguodvoatxhbibfvjch.supabase.co/functions/v1/playlist?screenId=${screenId}`);
-            if (!res.ok) throw new Error("Server error");
-            const data = await res.json();
+            
+            // Try to parse the JSON first, regardless of the HTTP status code
+            let data = {};
+            try { data = await res.json(); } catch(e) {}
+            
+            // 🛑 Handle "Screen not found"
+            if (data && data.error) {
+                console.warn("Screen is unregistered:", data.error);
+                videos = []; // Empty the memory playlist
+                try { fs.unlinkSync(playlistCachePath); } catch(e) {} // Delete saved playlist
+                showUnregisteredError(); // Show ORANGE screen with MAC Address
+                return; // Stop sync completely
+            }
+
+            if (!res.ok) throw new Error("Server error HTTP " + res.status);
+
+            // If we recovered from being unregistered, ensure text is green again
+            if (idleTimeTxt.innerText === "UNREGISTERED") restoreNormalUi();
+
+            // ⚡ AUTO-UPDATE CHECK ⚡
+            if (data.version) {
+                const remoteVer = data.version.replace('v', '');
+                const localVer = currentAppVersion.replace('v', '');
+                if (remoteVer !== localVer && !updateTriggered) {
+                    console.log(`Update detected: ${remoteVer}`);
+                    updateTriggered = true; 
+                    ipcRenderer.send('trigger-update');
+                }
+            }
+
             const newList = data.videos || [];
 
             if (newList.length > 0) {
@@ -190,10 +282,10 @@
                 
                 videos = newList;
                 fs.writeFileSync(playlistCachePath, JSON.stringify(videos));
-                playSync(); // Trigger playback with new list
+                playSync(); 
             }
         } catch (err) {
-            console.log("Sync skipped (Offline or Server Error)");
+            console.log("Sync skipped (Offline or Server Error):", err.message);
         } finally {
             setTimeout(syncVideos, 60000); 
         }
@@ -223,16 +315,31 @@
         });
     }
 
+    // --- CONTROLS ---
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight') { timeOffset += 0.01; saveOffset(); }
+        if (e.key === 'ArrowLeft') { timeOffset -= 0.01; saveOffset(); }
+    });
+
+    function saveOffset() {
+        try { fs.writeFileSync(offsetFile, timeOffset.toString()); } catch(e) {}
+        syncUi.innerText = `OFFSET: ${timeOffset > 0 ? '+' : ''}${timeOffset.toFixed(2)}s`;
+        syncUi.style.display = 'block';
+        clearTimeout(window.uiTimer);
+        window.uiTimer = setTimeout(() => syncUi.style.display = 'none', 3000);
+        if (videos.length) playSync(true); 
+    }
+
     // Emergency Watchdog
     setInterval(() => {
         if (videos.length > 0 && (video.paused || video.readyState < 2)) {
+            console.log("Watchdog restarting video...");
             playSync(true);
         }
     }, 5000);
 
-    bootstrap();
-
+    // KICK OFF THE APP
+    startApp();
 </script>
-
 </body>
 </html>
